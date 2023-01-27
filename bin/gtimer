@@ -1,0 +1,373 @@
+#!/bin/bash
+# -*- mode: sh -*-
+#
+# Title:        gtimer
+# Author:       VlaSard
+# Description:  The timer of countdown of time and giving of a sound signal.
+# License:      GPL v3 or later
+# Dependencies: mpg123 1.31.1,
+#               yad 12.3 (GTK+ 3.24.36)
+
+# gettext initialization
+export TEXTDOMAIN='gtimer'
+export TEXTDOMAINDIR='/usr/share/locale'
+
+declare -r gt_proc="${TEMPDIR:-/tmp}/gtimer.proc"
+[[ -f "$gt_proc" ]] && exit
+
+# check for dependencies
+if ! type yad >/dev/null 2>&1; then
+  MISSING_DEPS="TRUE"
+  echo "$(tput setaf 1)yad is not installed!$(tput sgr0)"
+fi
+
+if ! type mpg123 >/dev/null 2>&1; then
+  MISSING_DEPS="TRUE"
+  echo "$(tput setaf 1)mpg123 is not installed!$(tput sgr0)"
+fi
+
+if [ "$MISSING_DEPS" = "TRUE" ]; then
+  echo "$(tput setaf 1)Missing one or more packages required to run; \
+  exiting...$(tput sgr0)"
+  exit 1
+fi
+
+# yad options
+export YAD_OPTIONS="--use-interp --window-icon=gtimer --name=gtimer"
+
+# default variables
+declare -r gt_config="$HOME/.config/gtimer/gtimer.conf"
+# declare sound delay splash
+
+gt_version='20230127'
+gt_name="$(gettext "Gnome timer")"
+
+export gt_config gt_version gt_name sound delay splash
+export gt_proc notice_id mpg_id settings_id menu_id splash_id start_id
+
+# create gt_proc file
+{
+  echo "notice_id="
+  echo "mpg_id="
+  echo "settings_id="
+  echo "menu_id="
+  echo "splash_id="
+  echo "start_id="
+} >"$gt_proc"
+
+# create configuration file
+gt_cfile() {
+
+  [[ ! -d "$HOME/.config/gtimer" ]] && mkdir -p "$HOME/.config/gtimer"
+
+  {
+    echo '# This file contains settings for gtimer'
+    echo '# ---------------------------------------------------------------'
+    echo
+    echo '# Signal melody. Specifies the full path to the file.'
+    echo 'sound="alarm.mp3"'
+    echo
+    echo '# After what period of time the signal will work. Set in minutes.'
+    echo 'delay="10"'
+    echo
+    echo '# Show splash screen on startup.'
+    echo '#    TRUE - show splash screen'
+    echo '#    FALSE - don'\''t show splash screen'
+    echo 'splash="TRUE"'
+  } >"$gt_config"
+}
+
+# program exit
+exit_gtimer() {
+  . "${gt_proc}"
+
+  [[ -n "$mpg_id" ]] &&
+    pgrep mpg123 >&/dev/null &&
+    kill -USR1 "$mpg_id"
+
+  [[ -n "$notice_id" ]] &&
+    kill -USR1 "$notice_id" >&/dev/null
+
+  [[ -n "$settings_id" ]] &&
+    kill -USR1 "$settings_id" >&/dev/null
+
+  [[ -n "$menu_id" ]] &&
+    kill -USR1 "$menu_id" >&/dev/null
+
+  [[ -n "$splash_id" ]] &&
+    kill -USR1 "$splash_id" >&/dev/null
+
+  [[ -n "$start_id" ]] &&
+    kill -USR1 "$start_id" >&/dev/null
+
+  rm "$gt_proc"
+}
+export -f exit_gtimer
+
+# exit test rington
+exit_test() {
+  . "${gt_proc}"
+
+  [[ -n "$mpg_pid" ]] &&
+    pgrep mpg123 >&/dev/null && kill "$mpg_id"
+
+  [[ -n "$notice_id" ]] &&
+    kill -USR1 "$notice_id"
+
+  sed -i "s/^notice.*/notice_id=/; s/^mpg.*/mpg_id=/" "$gt_proc"
+}
+export -f exit_test
+
+# test rington
+gt_test() {
+  . "${gt_proc}"
+
+  if [ -n "$notice_id" ]; then
+    exit_test
+  else
+
+    if [ -e "$1" ]; then
+      msg="$(gettext "Checking the selected ringtone")"
+      gt_player "$1"
+    else
+      msg="$(gettext "Missing file or signal name not transmitted")"
+    fi
+
+    gt_notice "$msg"
+
+    sleep 4
+    exit_test
+  fi
+}
+export -f gt_test
+
+# player rington
+gt_player() {
+  mpg123 "$1" >&/dev/null &
+  mpg_id=$!
+  sed -i "s/^mpg.*/mpg_id=$mpg_id/" "$gt_proc"
+}
+export -f gt_player
+
+# notice
+gt_notice() {
+  yad \
+    --undecorated \
+    --no-buttons \
+    --borders=12 \
+    --geometry=250x20-50-50 \
+    --text-align=center \
+    --text="\n$1" &
+
+  notice_id=$!
+  sed -i "s/^notice.*/notice_id=$notice_id/" "$gt_proc"
+}
+export -f gt_notice
+
+exit_start() {
+  . "${gt_proc}"
+
+  [[ -n "$mpg_id" ]] &&
+    pgrep mpg123 >&/dev/null &&
+    kill -USR1 "$mpg_id"
+
+  [[ -n "$notice_id" ]] &&
+    kill -USR1 "$notice_id" >&/dev/null
+
+  [[ -n "$start_id" ]] &&
+    kill -USR1 "$start_id" >&/dev/null
+
+  sed -i "s/^mpg.*/mpg_id=/; s/^notice.*/notice_id=/; s/^start.*/start_id=/" "$gt_proc"
+}
+export -f exit_start
+
+# start timer
+gt_start() {
+  . "${gt_proc}"
+  . "${gt_config}"
+
+  if [[ -n $start_id ]]; then
+    exit_start
+    gt_notice "$(gettext "Timer stop")"
+    sleep 4
+    exit_start
+  else
+    export delays=$((delay * 60))
+    times=$(date -s "+delays seconds" 2>/dev/null | cut -d " " -f4)
+
+    # delay time
+    delay() {
+      while [ $delays -ge 1 ]; do
+        echo -n "$delays "
+        sleep 1
+        delays=$((delays - 1))
+      done
+
+      gt_notice "$(gettext "Time is over")"
+      gt_player "$sound"
+
+      sleep 10
+
+      [[ -n "$mpg_id" ]] &&
+        pgrep mpg123 >&/dev/null &&
+        kill -USR1 "$mpg_id" &&
+        sed -i "s/^mpg.*/mpg_id=/" "$gt_config"
+
+      [[ -n "$notice_id" ]] &&
+        kill -USR1 "$notice_id" >&/dev/null &&
+        sed -i "s/^notice.*/notice=/" "$gt_config"
+
+      sed -i "s/^start.*/start=/" "$gt_config"
+    }
+
+    exec 3> >(
+      gt_notice "Start timer"
+      sleep 4
+      kill -USR1 "$!"
+      sed -i "s/^notice.*/notice_id=/" "$gt_proc"
+    )
+    echo tooltip: $"$times" >&3
+
+    delay &
+    start_id=$!
+    sed -i "s/^start.*/start_id=$start_id/" "$gt_proc"
+  fi
+}
+export -f gt_start
+
+# save settings
+gt_setsave() {
+  . "${gt_config}"
+  . "${gt_proc}"
+
+  if [ "$sound" != "$1" ] && [ "$delay" != "$2" ]; then
+    sed -i "s/^sound.*/sound=\"${1//\//\\\/}\"/; s/^delay.*/delay=\"$2\"/" "$gt_config"
+  elif [ "$sound" != "$1" ]; then
+    sed -i "s/^sound.*/sound=\"${1//\//\\\/}\"/" "$gt_config"
+  elif [ "$delay" != "$2" ]; then
+    sed -i "s/^delay.*/delay=\"$2\"/" "$gt_config"
+  fi
+
+  kill -USR1 "$settings_id"
+  sed -i "s/^settings.*/settings_id=/" "$gt_proc"
+  exit_test
+}
+export -f gt_setsave
+
+# save splash
+gt_savespl() {
+  . "${gt_config}"
+  . "${gt_proc}"
+
+  [[ $splash != "$1" ]] &&
+    sed -i "s/^splash.*/splash=\"$1\"/" "$gt_config"
+
+  kill -USR1 "$splash_id"
+  sed -i "s/^splash.*/splash_id=/" "$gt_proc"
+}
+export -f gt_savespl
+
+# welcome splash
+gt_splash() {
+  . "${gt_proc}"
+
+  [[ -n "$splash_id" ]] && return
+
+  text="<span font='28' fgcolor='#3584E4'>$gt_name</span>\n"
+  text+="<span font='8'><i>$gt_version</i></span>\n\n"
+  text+="$(gettext "Countdown timer").\n\n"
+  text+="$(gettext "When the set time has elapsed, it beeps and displays a message").\n\n"
+  text+="$(gettext "The program is configured and controlled through an icon in the system tray").\n\n"
+  text+="$(gettext "In the settings menu you can set the melody and countdown time").\n\n"
+  text+="$(gettext "You can connect custom ringtones").\n"
+  text+="\n\n"
+
+  yad \
+    --no-buttons \
+    --undecorated \
+    --skip-taskbar \
+    --on-top \
+    --center \
+    --no-escape \
+    --borders=30 \
+    --width=400 \
+    --title="$(gettext "Welcome")" \
+    --text-align=center \
+    --text-width=60 \
+    --text="$text" \
+    --form \
+    --columns=3 \
+    --field="$(gettext "Show splash screen at startup")":CHK "$splash" \
+    --field="$(gettext "Exit")":FBTN "exit_gtimer" \
+    --field="$(gettext "Close")":FBTN "gt_savespl %1" &
+
+  splash_id=$!
+  sed -i "s/^splash.*/splash_id=$splash_id/" "$gt_proc"
+}
+export -f gt_splash
+
+# start splash
+gt_start_splash() {
+  . "${gt_config}"
+
+  [[ "$splash" = TRUE ]] && gt_splash
+}
+
+# settings menu
+gt_settings() {
+  . "${gt_config}"
+  . "${gt_proc}"
+
+  [[ -n "$settings_id" ]] && return
+
+  yad \
+    --undecorated \
+    --center \
+    --borders=10 \
+    --no-buttons \
+    --no-escape \
+    --width=500 \
+    --title="$(gettext "Settings")" \
+    --text="\n$(gettext "Setting the sound and the time after which the alarm will sound").\n" \
+    --text-align=center \
+    --text-width=60 \
+    --file-filter="*.mp3" \
+    --form \
+    --columns=1 \
+    --homogeneous \
+    --field="$(gettext "signal")\\t":FL "$sound" \
+    --field="$(gettext "delay")\\t":NUM "$delay"!1..100 \
+    --field=" ":LBL "" \
+    --field="$(gettext "Test")"!:FBTN "gt_test %1" \
+    --field="$(gettext "Close")":FBTN "gt_setsave %1 %2" &
+
+  settings_id=$!
+  sed -i "s/^settings.*/settings_id=$settings_id/" "$gt_proc"
+}
+export -f gt_settings
+
+# system tray menu
+gt_menu() {
+  MENU="$(gettext "Settings")!gt_settings!gtk-preferences|"
+  MENU+="$(gettext "Start / Stop")!gt_start!system-run|"
+  MENU+='|'
+  MENU+="$(gettext "About")!gt_splash!help-about|"
+  MENU+='|'
+  MENU+="$(gettext "Exit")!exit_gtimer!application-exit"
+
+  yad \
+    --notification \
+    --image=gtimer-tray \
+    --no-middle \
+    --menu="$MENU" \
+    --command=menu &
+
+  menu_id=$!
+  sed -i "s/^menu.*/menu_id=$menu_id/" "$gt_proc"
+}
+export -f gt_menu
+
+[[ ! -f "$gt_config" ]] && gt_cfile
+
+gt_start_splash
+gt_menu

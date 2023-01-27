@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Timer
+Name[ru]=Таймер
+Comment=Send signal after a specified time
+Comment[ru]=Подать сигнал через заданное время
+Exec=gtimer
+Icon=gtimer
+Type=Application
+Terminal=false
+StartupNotify=false
+Categories=Utility;Clock;
+Keywords=gtimer;timer;
